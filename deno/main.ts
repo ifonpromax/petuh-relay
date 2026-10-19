@@ -8,10 +8,12 @@
 //   GET  /room/<code>/check         -> proxied to the Worker
 //   WS   /room/<code>?role=host|guest -> piped to the Worker (close codes 4404/4409 for missing/full rooms)
 //   GET  /health                    -> diagnostics
+//   GET/POST /podval/board/<day>    -> proxied to the ПОДВАЛ leaderboard Worker (same reason: workers.dev is unreachable from RU)
 
 const UPSTREAM = Deno.env.get("UPSTREAM") || "https://petuh-relay.ifonpromax.workers.dev";
+const BOARD_UPSTREAM = Deno.env.get("BOARD_UPSTREAM") || "https://podval-board.ifonpromax.workers.dev";
 const CODE_RE = /^[a-z0-9]{5}$/;
-const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*" };
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "*" };
 const STUN = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...CORS } });
@@ -52,6 +54,20 @@ Deno.serve(async (req) => {
     return json({ iso: ISO_ID, region: Deno.env.get("DENO_REGION") || null, pipes, upstream: !!up });
   }
   if (url.pathname === "/turn") return json(await turnCreds());
+
+  // ПОДВАЛ daily leaderboard: plain HTTP pass-through to its own Worker
+  const bm = url.pathname.match(/^/podval/board/(d{8})$/);
+  if (bm) {
+    if (req.method !== "GET" && req.method !== "POST") return json({ error: "method" }, 405);
+    try {
+      const body = req.method === "POST" ? await req.text() : undefined;
+      if (body && body.length > 2048) return json({ error: "too big" }, 413);
+      const r = await fetch(`${BOARD_UPSTREAM}/board/${bm[1]}`, { method: req.method, headers: { "content-type": "application/json" }, body });
+      return new Response(await r.text(), { status: r.status, headers: { "content-type": "application/json", ...CORS } });
+    } catch (e) {
+      return json({ error: "upstream", detail: String((e as Error)?.message || e) }, 502);
+    }
+  }
 
   const m = url.pathname.match(/^\/room\/([a-z0-9]{5})(\/check)?$/);
   if (!m || !CODE_RE.test(m[1])) return new Response("petuh-vs-kot relay: ok", { headers: { "content-type": "text/plain", ...CORS } });
