@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   if (url.pathname === "/turn") return json(await turnCreds());
 
   // ПОДВАЛ daily leaderboard: plain HTTP pass-through to its own Worker
-  const bm = url.pathname.match(/^/podval/board/(d{8})$/);
+  const bm = url.pathname.match(/^\/podval\/board\/(\d{8})$/);
   if (bm) {
     if (req.method !== "GET" && req.method !== "POST") return json({ error: "method" }, 405);
     try {
